@@ -17,7 +17,7 @@ typedef struct ListEntry_struct {
 	edgeweight dist_val;
 } ListEntry;
 
-ApproxCloseness::ApproxCloseness(const Graph& G, count nSamples, double epsilon, bool normalized, CLOSENESS_TYPE type) : Centrality(G, normalized), nSamples(nSamples), epsilon(epsilon), type(type) {
+ApproxCloseness::ApproxCloseness(const Graph& G, count nSamples, double epsilon, bool harmonic, bool normalized, CLOSENESS_TYPE type) : Centrality(G, normalized), nSamples(nSamples), epsilon(epsilon), type(type) {
 	assert(nSamples > 0 && nSamples <= G.numberOfNodes() && epsilon >= 0);
 }
 
@@ -35,27 +35,37 @@ void ApproxCloseness::run() {
 				estimateClosenessForDirectedGraph(true);
 				std::vector<double> outbound = scoreData;
 				estimateClosenessForDirectedGraph(false);
-				G.parallelForNodes([&](node u) {
-					scoreData[u] += outbound[u];
-				});
+				if(harmonic){
+					G.parallelForNodes([&](node u) {
+						scoreData[u] += 1/outbound[u];
+					});
+				}else{
+					G.parallelForNodes([&](node u) {
+						scoreData[u] += outbound[u];
+					});
+				}
 				break;
 			}
 			default:
 				break;
 		}
 
-		G.parallelForNodes([&](node u) {
-			if (fabs(scoreData[u]) > 1e-9) {
-				scoreData[u] = 1/scoreData[u];
-			}
+		if(!harmonic){
+			G.parallelForNodes([&](node u) {
+				if (fabs(scoreData[u]) > 1e-9) {
+					scoreData[u] = 1/scoreData[u];
+				}
 
-		});
+			});
+		}
 
 	} else {
 		estimateClosenessForUndirectedGraph();
-		G.parallelForNodes([&](node u) {
-			scoreData[u] = normalized? (G.numberOfNodes()-1) / scoreData[u] : 1 / scoreData[u];
-		});
+		if(!harmonic){
+			G.parallelForNodes([&](node u) {
+				scoreData[u] = normalized? (G.numberOfNodes()-1) / scoreData[u] : 1 / scoreData[u];
+			});
+		}
 	}
 
 	hasRun = true;
@@ -91,28 +101,50 @@ void ApproxCloseness::estimateClosenessForUndirectedGraph() {
 	for (count i = 0; i < nSamples; ++i) {
 		runOnPivot(i, pivot, delta, sampledNodes);
 	}
+	if(harmonic)
+		G.parallelForNodes([&](node u) {
+			if (sampledNodes[pivot[u]] != u) { // exclude sampled nodes
+				count LNum = G.numberOfNodes() - 1 - HNum[u] - nSamples + LCNum[u];
+				count HCNum = nSamples - LCNum[u];
 
-	G.parallelForNodes([&](node u) {
-		if (sampledNodes[pivot[u]] != u) { // exclude sampled nodes
-			count LNum = G.numberOfNodes() - 1 - HNum[u] - nSamples + LCNum[u];
-			count HCNum = nSamples - LCNum[u];
+				bool includeHCTerm = true;
+				if (HCNum == 0) includeHCTerm = false;
 
-			bool includeHCTerm = true;
-			if (HCNum == 0) includeHCTerm = false;
+				double p = (double) LCNum[u] / (double) LNum;
+				scoreData[u] = 1 / (HSum[u] + HCSum[u] + LCSum[u] / p);
+				double LCSqAvg = (LCSum[u] / (double) LCNum[u]) * (LCSum[u] / (double) LCNum[u]);
+				if (includeHCTerm) {
+					SQErrEst[u] = 1.0 / (double) LCNum[u] *  (LCSumSQ[u] / (double) LCNum[u] - LCSqAvg) * LNum + HCSumSQErr[u] / (double) HCNum * HNum[u];
+				} else {
+					SQErrEst[u] = 1.0 / (double) LCNum[u] *  (LCSumSQ[u] / (double) LCNum[u] - LCSqAvg) * LNum;
+				}
 
-			double p = (double) LCNum[u] / (double) LNum;
-			scoreData[u] = HSum[u] + HCSum[u] + LCSum[u] / p;
-			double LCSqAvg = (LCSum[u] / (double) LCNum[u]) * (LCSum[u] / (double) LCNum[u]);
-			if (includeHCTerm) {
-				SQErrEst[u] = 1.0 / (double) LCNum[u] *  (LCSumSQ[u] / (double) LCNum[u] - LCSqAvg) * LNum + HCSumSQErr[u] / (double) HCNum * HNum[u];
 			} else {
-				SQErrEst[u] = 1.0 / (double) LCNum[u] *  (LCSumSQ[u] / (double) LCNum[u] - LCSqAvg) * LNum;
+				SQErrEst[u] = 0.0;
 			}
+		});
+	else
+		G.parallelForNodes([&](node u) {
+			if (sampledNodes[pivot[u]] != u) { // exclude sampled nodes
+				count LNum = G.numberOfNodes() - 1 - HNum[u] - nSamples + LCNum[u];
+				count HCNum = nSamples - LCNum[u];
 
-		} else {
-			SQErrEst[u] = 0.0;
-		}
-	});
+				bool includeHCTerm = true;
+				if (HCNum == 0) includeHCTerm = false;
+
+				double p = (double) LCNum[u] / (double) LNum;
+				scoreData[u] = HSum[u] + HCSum[u] + LCSum[u] / p;
+				double LCSqAvg = (LCSum[u] / (double) LCNum[u]) * (LCSum[u] / (double) LCNum[u]);
+				if (includeHCTerm) {
+					SQErrEst[u] = 1.0 / (double) LCNum[u] *  (LCSumSQ[u] / (double) LCNum[u] - LCSqAvg) * LNum + HCSumSQErr[u] / (double) HCNum * HNum[u];
+				} else {
+					SQErrEst[u] = 1.0 / (double) LCNum[u] *  (LCSumSQ[u] / (double) LCNum[u] - LCSqAvg) * LNum;
+				}
+
+			} else {
+				SQErrEst[u] = 0.0;
+			}
+		});
 }
 
 void ApproxCloseness::estimateClosenessForDirectedGraph(bool outbound) {
@@ -148,7 +180,10 @@ void ApproxCloseness::computeClosenessForDirectedWeightedGraph(bool outbound) {
 			if (dist[v] == infDist) break;
 			if (count[v] < nSamples) {  // only continue if count[v] < k
 				if (u != v) {
-					distSum[v] += dist[v];
+					if(harmonic)
+						distSum[v] += 1 / dist[v];
+					else
+						distSum[v] += dist[v];
 					count[v]++;
 					if (count[v] == nSamples) {
 						T[v] = t;
@@ -178,18 +213,32 @@ void ApproxCloseness::computeClosenessForDirectedWeightedGraph(bool outbound) {
 		}
 	});
 
-	G.parallelForNodes([&](node v) {
-		if (count[v] == 0) {
-			scoreData[v] = 0;
-		} else {
-			scoreData[v] = distSum[v] / (double) count[v];
-		}
-		if (count[v] < nSamples) {
-			R[v] = count[v];
-		} else {
-			R[v] = 1 + ((nSamples - 1) * (G.numberOfNodes() - 2)) / (double) (T[v] - 1);
-		}
-	});
+	if(harmonic)
+		G.parallelForNodes([&](node v) {
+			if (count[v] == 0) {
+				scoreData[v] = 0;
+			} else {
+				scoreData[v] = distSum[v] / (double) count[v];
+			}
+			if (count[v] < nSamples) {
+				R[v] = count[v];
+			} else {
+				R[v] = 1 + ((nSamples - 1) * (G.numberOfNodes() - 2)) / (double) (T[v] - 1);
+			}
+		});
+	else
+		G.parallelForNodes([&](node v) {
+			if (count[v] == 0) {
+				scoreData[v] = 0;
+			} else {
+				scoreData[v] = 1 / (distSum[v] / (double) count[v]);
+			}
+			if (count[v] < nSamples) {
+				R[v] = count[v];
+			} else {
+				R[v] = 1 + ((nSamples - 1) * (G.numberOfNodes() - 2)) / (double) (T[v] - 1);
+			}
+		});
 }
 
 void ApproxCloseness::computeClosenessForDirectedUnweightedGraph(bool outbound) {
@@ -217,7 +266,10 @@ void ApproxCloseness::computeClosenessForDirectedUnweightedGraph(bool outbound) 
 			node v = q.front(); q.pop();
 			if (count[v] < nSamples) {  // only continue if count[v] < k
 				if (u != v) {
-					distSum[v] += dist[v];
+					if(harmonic)
+						distSum[v] += 1 / dist[v];
+					else
+						distSum[v] += dist[v];
 					count[v]++;
 					if (count[v] == nSamples) {
 						T[v] = t;

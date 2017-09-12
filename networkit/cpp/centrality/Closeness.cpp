@@ -20,9 +20,9 @@
 
 namespace NetworKit {
 
-Closeness::Closeness(const Graph& G, bool normalized, bool checkConnectedness) : Centrality(G, normalized) {
+Closeness::Closeness(const Graph& G, bool harmonic, bool normalized, bool checkConnectedness) : Centrality(G, normalized) {
 	// TODO: extend closeness definition to make check for connectedness unnecessary
-	if (checkConnectedness) {
+	if (!harmonic && checkConnectedness) {
 		ConnectedComponents compo(G);
 		compo.run();
 		if (compo.numberOfComponents() != 1) {
@@ -36,27 +36,48 @@ void Closeness::run() {
 	scoreData.clear();
 	scoreData.resize(z);
 	edgeweight infDist = std::numeric_limits<edgeweight>::max();
-
-	G.parallelForNodes([&](node s) {
-		std::unique_ptr<SSSP> sssp;
-		if (G.isWeighted()) {
-			sssp.reset(new Dijkstra(G, s, true, true));
-		} else {
-			sssp.reset(new BFS(G, s, true, true));
-		}
-		sssp->run();
-
-		std::vector<edgeweight> distances = sssp->getDistances();
-
-		double sum = 0;
-		for (auto dist : distances) {
-			if (dist != infDist ) {
-				sum += dist;
+	if(harmonic)
+		G.parallelForNodes([&](node s) {
+			std::unique_ptr<SSSP> sssp;
+			if (G.isWeighted()) {
+				sssp.reset(new Dijkstra(G, s, true, true));
+			} else {
+				sssp.reset(new BFS(G, s, true, true));
 			}
-		}
-		scoreData[s] = 1 / sum;
+			sssp->run();
 
-	});
+			std::vector<edgeweight> distances = sssp->getDistances();
+
+			double sum = 0;
+			for (auto dist : distances) {
+				if (dist != infDist ) {
+					sum += 1 / dist;
+				}
+			}
+			scoreData[s] = sum;
+
+		});
+	else
+		G.parallelForNodes([&](node s) {
+			std::unique_ptr<SSSP> sssp;
+			if (G.isWeighted()) {
+				sssp.reset(new Dijkstra(G, s, true, true));
+			} else {
+				sssp.reset(new BFS(G, s, true, true));
+			}
+			sssp->run();
+
+			std::vector<edgeweight> distances = sssp->getDistances();
+
+			double sum = 0;
+			for (auto dist : distances) {
+				if (dist != infDist ) {
+					sum += dist;
+				}
+			}
+			scoreData[s] = 1 / sum;
+
+		});
 	if (normalized) {
 		G.forNodes([&](node u){
 			scoreData[u] = scoreData[u] * (G.numberOfNodes() - 1);

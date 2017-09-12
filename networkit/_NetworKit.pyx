@@ -6070,11 +6070,11 @@ cdef class Betweenness(Centrality):
 
 cdef extern from "cpp/centrality/Closeness.h":
 	cdef cppclass _Closeness "NetworKit::Closeness" (_Centrality):
-		_Closeness(_Graph, bool, bool) except +
+		_Closeness(_Graph, bool, bool, bool) except +
 
 cdef class Closeness(Centrality):
 	"""
-		Closeness(G, normalized=False, checkConnectedness=True)
+		Closeness(G, harmonic=False, normalized=False, checkConnectedness=True)
 
 		Constructs the Closeness class for the given Graph `G`. If the Closeness scores should be normalized,
   		then set `normalized` to True. The run() method takes O(nm) time, where n is the number
@@ -6084,15 +6084,17 @@ cdef class Closeness(Centrality):
 	 	----------
 	 	G : Graph
 	 		The graph.
-	 	normalized : bool, optional
+	 	harmonic : bool, optional
 	 		Set this parameter to True if scores should be normalized in the interval [0,1]. Normalization only for unweighted networks.
+	 	normalized : bool, optional
+	 		Use harmonic centrality calculations. The graph will not need to be connected.
 	 	checkConnectedness : bool, optional
 			turn this off if you know the graph is connected
 	"""
 
-	def __cinit__(self, Graph G, normalized=False, checkConnectedness=True):
+	def __cinit__(self, Graph G, harmonic=False, normalized=False, checkConnectedness=True):
 		self._G = G
-		self._this = new _Closeness(G._this, normalized, checkConnectedness)
+		self._this = new _Closeness(G._this, harmonic, normalized, checkConnectedness)
 
 
 cdef extern from "cpp/centrality/KPathCentrality.h":
@@ -6271,7 +6273,7 @@ cdef extern from "cpp/centrality/ApproxCloseness.h":
 cdef extern from "cpp/centrality/ApproxCloseness.h":
 	cdef cppclass _ApproxCloseness "NetworKit::ApproxCloseness" (_Centrality):
 		_ClosenessType type
-		_ApproxCloseness(_Graph, count, float, bool, _ClosenessType type) except +
+		_ApproxCloseness(_Graph, count, float, bool, bool, _ClosenessType type) except +
 		vector[double] getSquareErrorEstimates() except +
 
 
@@ -6280,7 +6282,7 @@ cdef class ApproxCloseness(Centrality):
 	""" Approximation of closeness centrality according to algorithm described in
   Cohen et al., Computing Classic Closeness Centrality, at Scale.
 
-	ApproxCloseness(G, nSamples, epsilon=0.1, normalized=False, type=OUTBOUND)
+	ApproxCloseness(G, nSamples, epsilon=0.1, harmonic=False, normalized=False, type=OUTBOUND)
 
 	The algorithm approximates the closeness of all nodes in both directed and undirected graphs using a hybrid estimator.
 	First, it takes nSamples samples. For these sampled nodes, the closeness is computed exactly. The pivot of each of the
@@ -6295,6 +6297,8 @@ cdef class ApproxCloseness(Centrality):
 		user defined number of samples
 	epsilon : double, optional
 		parameter used for the error guarantee; it is also used to control when to use sampling and when to use pivoting
+	harmonic : bool, optional
+		use harmonic centrality, Notice: that the graph will not need to be connected
 	normalized : bool, optional
 		normalize centrality values in interval [0,1]
 	type : _ClosenessType, optional
@@ -6306,9 +6310,9 @@ cdef class ApproxCloseness(Centrality):
 	OUTBOUND = 1
 	SUM = 2
 
-	def __cinit__(self, Graph G, nSamples, epsilon=0.1, normalized=False, _ClosenessType type=OUTBOUND):
+	def __cinit__(self, Graph G, nSamples, epsilon=0.1, harmonic=False, normalized=False, _ClosenessType type=OUTBOUND):
 		self._G = G
-		self._this = new _ApproxCloseness(G._this, nSamples, epsilon, normalized, type)
+		self._this = new _ApproxCloseness(G._this, nSamples, epsilon, harmonic, normalized, type)
 
 	def getSquareErrorEstimates(self):
 		""" Return a vector containing the square error estimates for all nodes.
